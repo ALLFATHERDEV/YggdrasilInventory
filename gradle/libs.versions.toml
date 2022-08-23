@@ -1,0 +1,26 @@
+metadata.format.version = "1.1"
+
+[versions]
+
+paper = "1.18.2-R0.1-SNAPSHOT"
+shadow = "7.1.2"
+runPaper = "1.0.6"
+pluginYmlBukkit = "0.5.1"
+annotations = "3.1"
+reflectasm = "1.11.9"
+mockbukkit = "2.85.2"
+anvilgui = "1.5.3-SNAPSHOT"
+
+[libraries]
+
+annotations = { group = "com.dorkbox", name = "Annotations", version.ref = "annotations"}
+reflectasm = { group = "com.esotericsoftware", name = "reflectasm", version.ref = "reflectasm"}
+paper = { group = "io.papermc.paper", name = "paper-api", version.ref = "paper" }
+mockbukkit = { group = "com.github.seeseemelk", name = "MockBukkit-v1.18", version.ref = "mockbukkit"}
+anvilgui = { group = "net.wesjd", name = "anvilgui", version.ref = "anvilgui"}
+
+[plugins]
+
+shadow = { id = "com.github.johnrengelman.shadow", version.ref = "shadow" }
+runPaper = { id = "xyz.jpenilla.run-paper", version.ref = "runPaper" }
+pluginYmlBukkit = { id = "net.minecrell.plugin-yml.bukkit", version.ref = "pluginYmlBukkit" }
