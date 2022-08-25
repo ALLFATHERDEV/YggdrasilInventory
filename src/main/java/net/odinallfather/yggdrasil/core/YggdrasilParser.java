@@ -30,28 +30,29 @@ import java.lang.reflect.Method;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicInteger;
-import java.util.function.Supplier;
 
 public class YggdrasilParser {
-
-    public static Supplier<Player> DUMMY = () -> null;
 
     private final Class<?> inventoryClass;
     private Object inventoryClassObject;
     private final InventoryInfo defaultInventoryInfo;
     private Inventory inventory;
+    private Inventory currentInventory;
     private String inventoryId;
+
+    @Nullable
+    private String dynamicTitle;
 
     @Nullable
     private Inventory[] listInventories;
     @Nullable
-    private List<ItemStack> listItems;
+    private List<YggdrasilItem> listItems;
     private int currentPage = 0;
 
     private final Map<Slot, InventoryItem> slotMap = Maps.newHashMap();
     private final MethodAccess classMethods;
     private final FieldAccess classFields;
-    private final Map<String, List<ItemStack>> switchItems = Maps.newHashMap();
+    private final Map<String, List<YggdrasilItem>> switchItems = Maps.newHashMap();
     //We don't want multiple slots
     private static int noSlotCount = 5000;
     private final Map<String, LoadingBarData> loadingBarData = Maps.newHashMap();
@@ -63,40 +64,19 @@ public class YggdrasilParser {
     @Nullable
     private String inventoryCloseEventMethod;
 
-    private final boolean lateBuild;
-
     public YggdrasilParser(Class<?> inventoryClass) {
         this.inventoryClass = inventoryClass;
         this.classMethods = MethodAccess.get(inventoryClass);
         this.classFields = FieldAccess.get(inventoryClass);
         this.defaultInventoryInfo = readInventoryInfo();
-        this.lookForDynamicPlayer();
-        if (!this.hasDynamicPlayer()) {
-            this.lateBuild = false;
-            this.inventoryClassObject = ConstructorAccess.get(inventoryClass).newInstance(null);
-            if (this.defaultInventoryInfo instanceof ListInventoryInfo)
-                this.parseListItems();
-            else
-                this.parseItems();
-        } else {
-            this.lateBuild = true;
-        }
+        this.inventoryClassObject = ConstructorAccess.get(inventoryClass).newInstance();
+        if (this.isList())
+            this.parseListItems();
+        else
+            this.parseItems();
         this.lookForInventoryEvents();
     }
 
-    private void lookForDynamicPlayer() {
-        for (Field f : this.classFields.getFields()) {
-            if (f.isAnnotationPresent(YggdrasilPlayer.class)) {
-                //dynamicPlayerField = f;
-                YggdrasilInventoryPlugin.LOGGER.info("Found dynamic player field in class {}", this.inventoryClass.getSimpleName());
-                break;
-            }
-        }
-    }
-
-    private boolean hasDynamicPlayer() {
-        return false;
-    }
 
     @Contract(" -> new")
     private @NotNull InventoryInfo readInventoryInfo() {
@@ -120,7 +100,7 @@ public class YggdrasilParser {
         boolean listItemsFound = false;
         for (Method m : inventoryClass.getMethods()) {
             if (m.isAnnotationPresent(ListItems.class)) {
-                this.listItems = (List<ItemStack>) classMethods.invoke(inventoryClassObject, m.getName());
+                this.listItems = (List<YggdrasilItem>) classMethods.invoke(inventoryClassObject, m.getName());
                 listItemsFound = true;
                 break;
             }
@@ -149,6 +129,19 @@ public class YggdrasilParser {
         }
     }
 
+    private void lookForDynamicTitle(Player player) {
+        for(Method m : this.inventoryClass.getDeclaredMethods()) {
+            if(m.isAnnotationPresent(DynamicTitle.class)) {
+                if(m.getParameterCount() != 1)
+                    throw new YggdrasilParserException("DynamicTitle method has less or more than 1 parameter");
+                if(!m.getReturnType().equals(String.class))
+                    throw new YggdrasilParserException("DynamicTitle function must have a return type of a string");
+                this.dynamicTitle = (String) this.classMethods.invoke(inventoryClassObject, m.getName(), player);
+                break;
+            }
+        }
+    }
+
 
     private void parseItem(Field field, int index) {
         if (field.isAnnotationPresent(Item.class)) {
@@ -159,8 +152,7 @@ public class YggdrasilParser {
                 ItemAction action = field.getAnnotation(ItemAction.class);
                 executableMethod = action.method();
             }
-            Object itemStackObj = classFields.get(inventoryClassObject, index);
-            ItemStack itemStack = (ItemStack) classFields.get(inventoryClassObject, index);
+            YggdrasilItem itemStack = (YggdrasilItem) classFields.get(inventoryClassObject, index);
             String switchId = "NONE";
 
             //Check for SwitchItem
@@ -168,7 +160,7 @@ public class YggdrasilParser {
                 SwitchItem si = field.getAnnotation(SwitchItem.class);
                 String id = si.id();
                 if (switchItems.containsKey(id)) {
-                    List<ItemStack> items = switchItems.get(id);
+                    List<YggdrasilItem> items = switchItems.get(id);
                     items.add(itemStack);
                     switchItems.replace(id, items);
                 } else {
@@ -187,11 +179,11 @@ public class YggdrasilParser {
                 if (this.loadingBarItemData.containsKey(loadingBarItem.id())) {
                     List<LoadingBarItemData> l = this.loadingBarItemData.get(loadingBarItem.id());
                     l.add(new LoadingBarItemData(this.loadingBarData.get(loadingBarItem.id()),
-                            (ItemStack) classFields.get(inventoryClassObject, index), loadingBarItem.filler()));
+                            (YggdrasilItem) classFields.get(inventoryClassObject, index), loadingBarItem.filler()));
                     this.loadingBarItemData.replace(loadingBarItem.id(), l);
                 } else
                     this.loadingBarItemData.put(loadingBarItem.id(), Lists.newArrayList(new LoadingBarItemData(this.loadingBarData.get(loadingBarItem.id()),
-                            (ItemStack) classFields.get(inventoryClassObject, index), loadingBarItem.filler())));
+                            (YggdrasilItem) classFields.get(inventoryClassObject, index), loadingBarItem.filler())));
             }
 
             //Check for TextInput
@@ -232,28 +224,24 @@ public class YggdrasilParser {
         return this.defaultInventoryInfo.list();
     }
 
-    public String getInventoryId() {
-        return inventoryId;
-    }
-
-    public Inventory getNextPage() {
+    public Inventory getNextPage(Player player) {
         if (this.currentPage + 1 >= this.listInventories.length)
             return null;
         this.currentPage++;
-        return this.getListInventories()[this.currentPage];
+        return this.getListInventories(player)[this.currentPage];
     }
 
-    public Inventory getPrevPage() {
+    public Inventory getPrevPage(Player player) {
         if (this.currentPage - 1 < 0)
             return null;
         this.currentPage--;
-        return this.getListInventories()[this.currentPage];
+        return this.getListInventories(player)[this.currentPage];
     }
 
-    public Inventory[] getListInventories() {
+    public Inventory[] getListInventories(Player player) {
         if (this.defaultInventoryInfo instanceof ListInventoryInfo listInfo && listItems != null) {
             if (this.listInventories == null) {
-                this.listInventories = this.defaultInventoryInfo.buildList(this.listItems.size());
+                this.listInventories = this.defaultInventoryInfo.buildList(this.dynamicTitle, this.listItems.size());
 
                 int index = 0;
                 for (Inventory listInventory : listInventories) {
@@ -263,7 +251,7 @@ public class YggdrasilParser {
                     for (Map.Entry<Slot, InventoryItem> entry : this.slotMap.entrySet()) {
                         Slot s = entry.getKey();
                         InventoryItem item = entry.getValue();
-                        s.place(item.item, listInventory);
+                        s.place(item.item.get(player), listInventory);
                     }
 
                     int rows = listInfo.rows() - 1;
@@ -271,7 +259,8 @@ public class YggdrasilParser {
                     for (int s = 0; s < totalCount; s++) {
                         if (index >= listItems.size())
                             break;
-                        listInventory.setItem(s, listItems.get(index));
+                        YggdrasilItem yggdrasilItem = listItems.get(index);
+                        listInventory.setItem(s, yggdrasilItem.get(player));
                         index++;
                     }
                 }
@@ -282,44 +271,39 @@ public class YggdrasilParser {
     }
 
     public Inventory getInventory(Player player) {
-        if (hasDynamicPlayer()) {
-            this.inventoryClassObject = ConstructorAccess.get(inventoryClass).newInstance(player);
-        }
-        if (lateBuild) {
-            if (this.isList()) {
-                this.parseListItems();
-            } else {
-                this.parseItems();
-            }
-            return this.getInventory();
+        this.lookForDynamicTitle(player);
+        if (this.isList()) {
+            this.currentInventory = this.getListInventories(player)[currentPage];
         } else {
-            return null;
+            this.currentInventory = this.getFinishedInventory(player);
         }
+        return this.currentInventory;
     }
 
     public Inventory getInventory() {
-        if (this.defaultInventoryInfo.list()) {
-            return this.getListInventories()[currentPage];
-        } else {
-            return this.getFinishedInventory();
-        }
+        return this.getInventory(null);
     }
 
-    private Inventory getFinishedInventory() {
+    private Inventory getFinishedInventory(Player player) {
         if (this.inventory != null)
             return this.inventory;
-        this.inventory = this.defaultInventoryInfo.build();
+        this.inventory = this.defaultInventoryInfo.build(this.dynamicTitle);
 
         if (!this.slotMap.isEmpty()) {
             for (Map.Entry<Slot, InventoryItem> entry : this.slotMap.entrySet()) {
                 Slot s = entry.getKey();
                 InventoryItem item = entry.getValue();
-                s.place(item.item, inventory);
+                s.place(item.item.get(player), inventory);
             }
         }
 
         return inventory;
     }
+
+    public String getInventoryId() {
+        return inventoryId;
+    }
+
 
     private AnvilGUI.Response tryToCallAnvilMethod(String method, Player player, Inventory inventory, String text) {
         try {
@@ -352,9 +336,9 @@ public class YggdrasilParser {
         return this.tryToCallMethod(method, player, inventory, clickedItem, false);
     }
 
-    private String getSwitchId(ItemStack item) {
+    private String getSwitchId(ItemStack item, Player player) {
         for (InventoryItem inventoryItem : this.slotMap.values()) {
-            if (inventoryItem.item.equals(item))
+            if (inventoryItem.item.get(player).equals(item))
                 return inventoryItem.switchId;
         }
         return "NONE";
@@ -370,25 +354,25 @@ public class YggdrasilParser {
         }
     }
 
-    private String getExecutableMethod(ItemStack item) {
+    private String getExecutableMethod(ItemStack item, Player player) {
         for (InventoryItem inventoryItem : this.slotMap.values()) {
-            if (inventoryItem.item.equals(item))
+            if (inventoryItem.item.get(player).equals(item))
                 return inventoryItem.executeMethod;
         }
         return "NONE";
     }
 
-    private OptionFlag getOption(ItemStack item) {
+    private OptionFlag getOption(ItemStack item, Player player) {
         for (InventoryItem inventoryItem : this.slotMap.values())
-            if (inventoryItem.item.equals(item))
+            if (inventoryItem.item.get(player).equals(item))
                 return inventoryItem.flag;
         return null;
     }
 
     public void callLoadingBar(String id, @Nullable Player player) {
         List<LoadingBarItemData> dataList = loadingBarItemData.get(id);
-        ItemStack loadingBarItem = null;
-        ItemStack filler = null;
+        YggdrasilItem loadingBarItem = null;
+        YggdrasilItem filler = null;
 
         if (dataList.size() == 1) {
             LoadingBarItemData loadingBarItemData = dataList.get(0);
@@ -415,16 +399,16 @@ public class YggdrasilParser {
                 throw new NullPointerException("Could not find filler item");
 
             for (int i = d.startPos; i <= width; i++) {
-                inventory.setItem(i, filler);
+                inventory.setItem(i, filler.get(player));
             }
         }
 
-        final ItemStack finalLoadingBarItem = loadingBarItem;
+        final YggdrasilItem finalLoadingBarItem = loadingBarItem;
         int taskId = Bukkit.getScheduler().scheduleSyncRepeatingTask(YggdrasilInventoryPlugin.getInstance(), () -> {
-            inventory.setItem(pos.get(), finalLoadingBarItem);
+            inventory.setItem(pos.get(), finalLoadingBarItem.get(player));
             pos.getAndIncrement();
             if (pos.get() > width) {
-                tryToCallMethod(d.methodToExecute, player, inventory, finalLoadingBarItem);
+                tryToCallMethod(d.methodToExecute, player, inventory, finalLoadingBarItem.get(player));
                 this.cancelTasks(id);
             }
         }, 0, d.tick);
@@ -441,18 +425,18 @@ public class YggdrasilParser {
     //========================HANDLE EVENTS========================
 
     public void handleInventoryClick(InventoryClickEvent event) {
-        Inventory toCheck = this.isList() ? this.listInventories[currentPage] : inventory;
-        if (event.getInventory().equals(toCheck)) {
+        //Inventory toCheck = this.isList() ? this.listInventories[currentPage] : inventory;
+        if (event.getInventory().equals(this.currentInventory)) {
             if (event.getCurrentItem() != null) {
                 event.setCancelled(true);
                 ItemStack clickedItem = event.getCurrentItem();
-                String method = this.getExecutableMethod(clickedItem);
+                String method = this.getExecutableMethod(clickedItem, (Player) event.getWhoClicked());
                 if (!method.equals("NONE")) {
-                    OptionFlag flag = this.getOption(clickedItem);
+                    OptionFlag flag = this.getOption(clickedItem, (Player) event.getWhoClicked());
                     if (flag != null) {
                         if (flag == OptionFlag.TEXT_INPUT) {
                             new AnvilGUI.Builder()
-                                    .onComplete((player1, s) -> tryToCallAnvilMethod(method, player1, toCheck, s))
+                                    .onComplete((player1, s) -> tryToCallAnvilMethod(method, player1, this.currentInventory, s))
                                     .text("Please input your text")
                                     .title("Enter your text")
                                     .plugin(YggdrasilInventoryPlugin.getInstance())
@@ -463,20 +447,21 @@ public class YggdrasilParser {
                     }
 
                     if (method.startsWith("switch")) {
-                        String switchId = this.getSwitchId(clickedItem);
+                        String switchId = this.getSwitchId(clickedItem, (Player) event.getWhoClicked());
                         if (switchId.equals("NONE")) {
                             YggdrasilInventoryPlugin.LOGGER.error("Something went wrong during switching from items");
                             event.setResult(Event.Result.DENY);
                             return;
                         }
-                        List<ItemStack> items = this.switchItems.get(switchId);
+                        List<YggdrasilItem> items = this.switchItems.get(switchId);
                         if (items == null || items.isEmpty()) {
                             YggdrasilInventoryPlugin.LOGGER.error("Something went wrong during switching from items");
                             event.setResult(Event.Result.DENY);
                             return;
                         }
+                        ItemStack stack = items.stream().filter(yggitem -> yggitem.get((Player) event.getWhoClicked()).equals(clickedItem)).findFirst().get().get((Player) event.getWhoClicked());
 
-                        int index = items.indexOf(clickedItem);
+                        int index = items.indexOf(stack);
                         if (index == -1) {
                             YggdrasilInventoryPlugin.LOGGER.error("Something went wrong during switching from items");
                             event.setResult(Event.Result.DENY);
@@ -489,17 +474,17 @@ public class YggdrasilParser {
                         if (index == items.size() - 1) {
                             nextIndex = 0;
                         }
-                        ItemStack nextItem = items.get(nextIndex);
-                        inventory.setItem(event.getSlot(), nextItem);
+                        YggdrasilItem nextItem = items.get(nextIndex);
+                        inventory.setItem(event.getSlot(), nextItem.get((Player) event.getWhoClicked()));
 
                         if (executableMethod != null) {
-                            Object res = this.tryToCallMethod(executableMethod, (Player) event.getWhoClicked(), toCheck, clickedItem);
+                            Object res = this.tryToCallMethod(executableMethod, (Player) event.getWhoClicked(), this.currentInventory, clickedItem);
                             if (res instanceof Event.Result)
                                 event.setResult((Event.Result) res);
                         }
                         return;
                     }
-                    Object res = this.tryToCallMethod(method, (Player) event.getWhoClicked(), toCheck, clickedItem);
+                    Object res = this.tryToCallMethod(method, (Player) event.getWhoClicked(), this.currentInventory, clickedItem);
                     if (res instanceof Event.Result) {
                         event.setResult((Event.Result) res);
                     }
@@ -509,8 +494,8 @@ public class YggdrasilParser {
     }
 
     public void handleInventoryOpen(InventoryOpenEvent event) {
-        Inventory toCheck = this.defaultInventoryInfo instanceof ListInventoryInfo ? this.listInventories[currentPage] : inventory;
-        if (event.getInventory().equals(toCheck)) {
+        //Inventory toCheck = this.isList() ? this.listInventories[currentPage] : inventory;
+        if (event.getInventory().equals(this.currentInventory)) {
             if (this.inventoryOpenEventMethod != null) {
                 this.tryToCallMethod(this.inventoryOpenEventMethod, (Player) event.getPlayer(), event.getInventory(), null, true);
             }
@@ -518,8 +503,8 @@ public class YggdrasilParser {
     }
 
     public void handleInventoryClose(InventoryCloseEvent event) {
-        Inventory toCheck = this.defaultInventoryInfo instanceof ListInventoryInfo ? this.listInventories[currentPage] : inventory;
-        if (event.getInventory().equals(toCheck)) {
+        //Inventory toCheck = this.isList() ? this.listInventories[currentPage] : inventory;
+        if (event.getInventory().equals(this.currentInventory)) {
             if (this.inventoryOpenEventMethod != null) {
                 this.tryToCallMethod(this.inventoryCloseEventMethod, (Player) event.getPlayer(), event.getInventory(), null, true);
             }
@@ -532,11 +517,11 @@ public class YggdrasilParser {
 
     }
 
-    private record LoadingBarItemData(LoadingBarData data, ItemStack item, boolean filler) {
+    private record LoadingBarItemData(LoadingBarData data, YggdrasilItem item, boolean filler) {
 
     }
 
-    private record InventoryItem(ItemStack item, String executeMethod, String switchId, OptionFlag flag) {
+    private record InventoryItem(YggdrasilItem item, String executeMethod, String switchId, OptionFlag flag) {
 
     }
 

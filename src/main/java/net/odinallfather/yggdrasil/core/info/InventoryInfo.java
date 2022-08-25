@@ -12,8 +12,8 @@ public interface InventoryInfo {
 
     boolean canMoveItems();
 
-    Inventory build();
+    Inventory build(String title);
 
-    Inventory[] buildList(int itemCount);
+    Inventory[] buildList(String title, int itemCount);
 
 }

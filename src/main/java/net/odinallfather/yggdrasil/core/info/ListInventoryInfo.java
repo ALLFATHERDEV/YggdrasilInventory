@@ -18,12 +18,12 @@ public record ListInventoryInfo(int rows, String title, boolean canMoveItems) im
     }
 
     @Override
-    public Inventory build() {
+    public Inventory build(String name) {
         throw new UnsupportedOperationException("Method not supported in list inventory info");
     }
 
     @Override
-    public Inventory[] buildList(int itemCount) {
+    public Inventory[] buildList(String title, int itemCount) {
         int size = this.size() - 9;
         if (size == 0)
             throw new IllegalArgumentException("Size must be greater then 9");
@@ -35,9 +35,9 @@ public record ListInventoryInfo(int rows, String title, boolean canMoveItems) im
         Inventory[] inventories = new Inventory[count];
         for (int i = 0; i < count; i++)
             if (YggdrasilInventoryPlugin.isJUnitTest())
-                inventories[i] = Bukkit.createInventory(null, this.size(), this.title);
+                inventories[i] = Bukkit.createInventory(null, this.size(), title != null ? title : this.title);
             else
-                inventories[i] = Bukkit.createInventory(null, this.size(), Component.text(this.title));
+                inventories[i] = Bukkit.createInventory(null, this.size(), Component.text(this.title != null ? title : this.title));
         return inventories;
     }
 }

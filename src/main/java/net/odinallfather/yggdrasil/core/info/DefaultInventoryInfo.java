@@ -13,15 +13,15 @@ public record DefaultInventoryInfo(int size, String title,
         return false;
     }
 
-    public Inventory build() {
+    public Inventory build(String title) {
         if (YggdrasilInventoryPlugin.isJUnitTest())
-            return Bukkit.createInventory(null, size, title);
+            return Bukkit.createInventory(null, size, title != null ? title : this.title());
         else
-            return Bukkit.createInventory(null, size, Component.text(title));
+            return Bukkit.createInventory(null, size, Component.text(title != null ? title : this.title()));
     }
 
     @Override
-    public Inventory[] buildList(int itemCount) {
+    public Inventory[] buildList(String name, int itemCount) {
         throw new UnsupportedOperationException("Method not supported in defaut inventory info");
     }
 }

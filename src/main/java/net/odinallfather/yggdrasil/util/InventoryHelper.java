@@ -20,8 +20,8 @@ public class InventoryHelper {
         if (!parser.isList())
             return false;
 
-        Inventory next = parser.getNextPage();
-        if(next != null) {
+        Inventory next = parser.getNextPage(player);
+        if (next != null) {
             player.openInventory(next);
             return true;
         }
@@ -33,8 +33,8 @@ public class InventoryHelper {
         if (!parser.isList())
             return false;
 
-        Inventory prev = parser.getPrevPage();
-        if(prev != null) {
+        Inventory prev = parser.getPrevPage(player);
+        if (prev != null) {
             player.openInventory(prev);
             return true;
         }

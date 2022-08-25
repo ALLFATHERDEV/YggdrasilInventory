@@ -51,12 +51,12 @@ public class YggdrasilInventoryPlugin extends JavaPlugin {
         Player player = (Player) sender;
 
         if (args.length == 0) {
-            Inventory inventory = manager.getDynamicInventory(TestDynamicInventory.ID, player);
+            Inventory inventory = manager.getInventory(TestDynamicInventory.ID, player);
             if (inventory != null) {
                 player.openInventory(inventory);
             }
         } else {
-            Inventory inventory = manager.getInventory(ListInventoryExample.ID);
+            Inventory inventory = manager.getInventory(ListInventoryExample.ID, player);
             if (inventory != null)
                 player.openInventory(inventory);
         }

@@ -1,9 +1,12 @@
 package net.odinallfather.yggdrasil.core.annotation;
 
+import org.bukkit.entity.Player;
+
 import java.lang.annotation.ElementType;
 import java.lang.annotation.Retention;
 import java.lang.annotation.RetentionPolicy;
 import java.lang.annotation.Target;
+import java.util.function.Function;
 
 /**
  * use this annotation to declare a class as an inventory
@@ -21,7 +24,7 @@ public @interface YggdrasilInventory {
     /**
      * @return title
      */
-    String title();
+    String title() default  "";
 
     /**
      * @return id
@@ -37,5 +40,6 @@ public @interface YggdrasilInventory {
      * @return true if you want that the player can move items
      */
     boolean canMoveItems() default false;
+
 
 }

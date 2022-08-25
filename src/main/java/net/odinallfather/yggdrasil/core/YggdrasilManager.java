@@ -17,7 +17,7 @@ import java.io.IOException;
 import java.lang.annotation.ElementType;
 import java.util.List;
 import java.util.Map;
-import java.util.function.Supplier;
+import java.util.function.Function;
 
 public class YggdrasilManager {
 
@@ -54,12 +54,13 @@ public class YggdrasilManager {
                     throw new NullPointerException("Could not find inventory id");
 
                 if (parser.isList()) {
-                    dataMap.put(inventoryId, new ListInventoryData(parser.getListInventories(), parser));
+                    dataMap.put(inventoryId, new ListInventoryData(parser::getListInventories, parser));
                 } else {
-                    dataMap.put(inventoryId, new DefaultInventoryData(parser.getInventory(), parser));
+                    dataMap.put(inventoryId, new DefaultInventoryData(parser::getInventory, parser));
                 }
 
-                Bukkit.getPluginManager().registerEvents(new InventoryListener(parser), this.plugin);
+                InventoryListener listener = new InventoryListener(parser);
+                Bukkit.getPluginManager().registerEvents(listener, this.plugin);
             });
 
         } catch (IOException e) {
@@ -67,20 +68,26 @@ public class YggdrasilManager {
         }
     }
 
-    public Inventory getDynamicInventory(String inventoryId, Player player) {
-        InventoryData data = this.dataMap.get(inventoryId);
-        if(data == null)
-            return null;
-        YggdrasilParser parser = data.parser();
-        return parser.getInventory(player);
-    }
 
-    @Nullable
-    public Inventory getInventory(String inventoryId) {
+    public Inventory getInventoryPage(String inventoryId, Player player, int page) {
         InventoryData data = this.dataMap.get(inventoryId);
         if (data == null)
             return null;
-        return data.parser().getInventory();
+        if (data.list()) {
+            Inventory[] inventories = data.inventories(player);
+            if (page < 0 || page >= inventories.length)
+                return null;
+            return inventories[page];
+        }
+        return null;
+    }
+
+    @Nullable
+    public Inventory getInventory(String inventoryId, Player player) {
+        InventoryData data = this.dataMap.get(inventoryId);
+        if (data == null)
+            return null;
+        return data.inventory(player);
     }
 
     public YggdrasilParser getParser(String inventoryId) {
@@ -92,9 +99,13 @@ public class YggdrasilManager {
 
     private interface InventoryData {
 
-        Inventory inventory();
+        default Inventory inventory(Player player) {
+            return null;
+        }
 
-        Inventory[] inventories();
+        default Inventory[] inventories(Player player) {
+            return null;
+        }
 
         boolean list();
 
@@ -102,10 +113,16 @@ public class YggdrasilManager {
 
     }
 
-    private record DefaultInventoryData(Inventory inventory, YggdrasilParser parser) implements InventoryData {
+    private record DefaultInventoryData(Function<Player, Inventory> inventory,
+                                        YggdrasilParser parser) implements InventoryData {
 
         @Override
-        public Inventory[] inventories() {
+        public Inventory inventory(Player player) {
+            return this.inventory.apply(player);
+        }
+
+        @Override
+        public Inventory[] inventories(Player player) {
             throw new UnsupportedOperationException("This method is not supported in this class");
         }
 
@@ -115,10 +132,15 @@ public class YggdrasilManager {
         }
     }
 
-    private record ListInventoryData(Inventory[] inventories, YggdrasilParser parser) implements InventoryData {
+    private record ListInventoryData(Function<Player, Inventory[]> inventories,
+                                     YggdrasilParser parser) implements InventoryData {
+
+        public Inventory[] inventories(Player player) {
+            return inventories.apply(player);
+        }
 
         @Override
-        public Inventory inventory() {
+        public Inventory inventory(Player player) {
             throw new UnsupportedOperationException("This method is not supported in this class");
         }
 
